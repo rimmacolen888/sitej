@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель - Site Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        .admin-dashboard {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .admin-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .admin-stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        .admin-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2rem;
+        }
+        .admin-tab {
+            padding: 1rem 2rem;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+        .admin-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+        .admin-content {
+            min-height: 400px;
+        }
+        .admin-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .admin-table th,
+        .admin-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .admin-table th {
+            background: var(--light-color);
+            font-weight: 600;
+        }
+        .form-inline {
+            display: flex;
+            gap: 1rem;
+            align-items: end;
+            margin-bottom: 2rem;
+        }
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            margin: 1rem 0;
+            transition: var(--transition);
+        }
+        .upload-area:hover {
+            border-color: var(--primary-color);
+        }
+        .login-form {
+            max-width: 400px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div id="admin-login" class="admin-login-section">
+        <div class="login-form">
+            <h2>Вход в админ-панель</h2>
+            <form id="admin-login-form">
+                <div class="form-group">
+                    <label>Логин:</label>
+                    <input type="text" name="username" required class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Пароль:</label>
+                    <input type="password" name="password" required class="form-input">
+                </div>
+                <button type="submit" class="btn btn-primary">Войти</button>
+            </form>
+            <div id="admin-message" class="auth-message"></div>
+        </div>
+    </div>
+
+    <div id="admin-dashboard" class="admin-dashboard hidden">
+        <header>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h1>Админ-панель Site Marketplace</h1>
+                <button id="admin-logout" class="btn btn-secondary">Выйти</button>
+            </div>
+        </header>
+
+        <div class="admin-stats" id="admin-stats"></div>
+
+        <div class="admin-tabs">
+            <button class="admin-tab active" data-tab="dashboard">Дашборд</button>
+            <button class="admin-tab" data-tab="users">Пользователи</button>
+            <button class="admin-tab" data-tab="sites">Сайты</button>
+            <button class="admin-tab" data-tab="orders">Заказы</button>
+            <button class="admin-tab" data-tab="invites">Инвайт-коды</button>
+            <button class="admin-tab" data-tab="import">Импорт</button>
+        </div>
+
+        <div class="admin-content">
+            <div id="tab-dashboard" class="tab-pane active">
+                <h3>Последняя активность</h3>
+                <div id="recent-activity"></div>
+            </div>
+
+            <div id="tab-users" class="tab-pane hidden">
+                <div class="form-inline">
+                    <select id="users-status" class="form-select">
+                        <option value="">Все пользователи</option>
+                        <option value="active">Активные</option>
+                        <option value="blocked">Заблокированные</option>
+                        <option value="expired">С истекшим доступом</option>
+                    </select>
+                    <button id="load-users" class="btn btn-primary">Загрузить</button>
+                </div>
+                <div id="users-table"></div>
+            </div>
+
+            <div id="tab-sites" class="tab-pane hidden">
+                <div class="form-inline">
+                    <select id="sites-category" class="form-select">
+                        <option value="">Все категории</option>
+                    </select>
+                    <select id="sites-status" class="form-select">
+                        <option value="">Все статусы</option>
+                        <option value="available">Доступные</option>
+                        <option value="sold">Проданные</option>
+                        <option value="reserved">Зарезервированные</option>
+                        <option value="hidden">Скрытые</option>
+                    </select>
+                    <button id="load-sites" class="btn btn-primary">Загрузить</button>
+                </div>
+                <div id="sites-table"></div>
+            </div>
+
+            <div id="tab-orders" class="tab-pane hidden">
+                <div class="form-inline">
+                    <select id="orders-status" class="form-select">
+                        <option value="">Все заказы</option>
+                        <option value="pending">Ожидают</option>
+                        <option value="confirmed">Подтвержденные</option>
+                        <option value="cancelled">Отмененные</option>
+                    </select>
+                    <button id="load-orders" class="btn btn-primary">Загрузить</button>
+                </div>
+                <div id="orders-table"></div>
+            </div>
+
+            <div id="tab-invites" class="tab-pane hidden">
+                <div class="form-inline">
+                    <input type="text" id="invite-code" placeholder="Код" class="form-input">
+                    <input type="number" id="invite-days" placeholder="Дней" value="15" class="form-input">
+                    <input type="number" id="invite-uses" placeholder="Использований" value="1" class="form-input">
+                    <button id="create-invite" class="btn btn-success">Создать</button>
+                </div>
+                <div id="invites-table"></div>
+            </div>
+
+            <div id="tab-import" class="tab-pane hidden">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <div>
+                        <h4>Импорт сайтов</h4>
+                        <select id="import-category" class="form-select">
+                            <option value="">Выберите категорию</option>
+                        </select>
+                        <div class="upload-area" id="sites-upload-area">
+                            <p>Перетащите TXT файл сюда или</p>
+                            <input type="file" id="sites-file" accept=".txt" style="display: none;">
+                            <button onclick="document.getElementById('sites-file').click()" class="btn btn-primary">Выбрать файл</button>
+                        </div>
+                        <label>
+                            <input type="checkbox" id="auto-approve"> Автоматически одобрять найденные в антипаблик
+                        </label>
+                        <button id="upload-sites" class="btn btn-success">Загрузить сайты</button>
+                    </div>
+                    
+                    <div>
+                        <h4>Импорт антипаблик базы</h4>
+                        <div class="upload-area" id="antipublic-upload-area">
+                            <p>Перетащите TXT файл с антипаблик базой</p>
+                            <input type="file" id="antipublic-file" accept=".txt" style="display: none;">
+                            <button onclick="document.getElementById('antipublic-file').click()" class="btn btn-primary">Выбрать файл</button>
+                        </div>
+                        <button id="upload-antipublic" class="btn btn-warning">Загрузить антипаблик</button>
+                    </div>
+                </div>
+                
+                <h4>История импортов</h4>
+                <div id="import-history"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script>
+        class AdminPanel {
+            constructor() {
+                this.currentTab = 'dashboard';
+                this.isLoggedIn = false;
+                this.init();
+            }
+
+            init() {
+                this.bindEvents();
+                this.checkAuth();
+            }
+
+            bindEvents() {
+                document.getElementById('admin-login-form').addEventListener('submit', (e) => this.handleLogin(e));
+                document.getElementById('admin-logout').addEventListener('click', () => this.logout());
+                
+                document.querySelectorAll('.admin-tab').forEach(tab => {
+                    tab.addEventListener('click', (e) => this.showTab(e.target.dataset.tab));
+                });
+
+                document.getElementById('load-users').addEventListener('click', () => this.loadUsers());
+                document.getElementById('load-sites').addEventListener('click', () => this.loadSites());
+                document.getElementById('load-orders').addEventListener('click', () => this.loadOrders());
+                document.getElementById('create-invite').addEventListener('click', () => this.createInvite());
+                document.getElementById('upload-sites').addEventListener('click', () => this.uploadSites());
+                document.getElementById('upload-antipublic').addEventListener('click', () => this.uploadAntipublic());
+            }
+
+            async checkAuth() {
+                const token = localStorage.getItem('admin_token');
+                if (token) {
+                    api.setToken(token);
+                    try {
+                        const response = await api.get('/admin/dashboard');
+                        this.showDashboard(response);
+                    } catch (error) {
+                        this.showLogin();
+                    }
+                } else {
+                    this.showLogin();
+                }
+            }
+
+            async handleLogin(e) {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                
+                try {
+                    const response = await api.adminLogin(formData.get('username'), formData.get('password'));
+                    localStorage.setItem('admin_token', response.token);
+                    api.setToken(response.token);
+                    
+                    const dashboardData = await api.get('/admin/dashboard');
+                    this.showDashboard(dashboardData);
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            showLogin() {
+                document.getElementById('admin-login').classList.remove('hidden');
+                document.getElementById('admin-dashboard').classList.add('hidden');
+            }
+
+            showDashboard(data) {
+                document.getElementById('admin-login').classList.add('hidden');
+                document.getElementById('admin-dashboard').classList.remove('hidden');
+                this.renderStats(data.stats);
+                this.renderRecentActivity(data.recent_activity);
+            }
+
+            renderStats(stats) {
+                const statsHtml = `
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${stats.total_users}</div>
+                        <div>Всего пользователей</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${stats.active_users}</div>
+                        <div>Активных</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${stats.available_sites}</div>
+                        <div>Доступных сайтов</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${stats.sold_sites}</div>
+                        <div>Продано</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${stats.confirmed_orders}</div>
+                        <div>Заказов</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="stat-number">${Math.round(stats.total_revenue)}</div>
+                        <div>Выручка ₽</div>
+                    </div>
+                `;
+                document.getElementById('admin-stats').innerHTML = statsHtml;
+            }
+
+            showTab(tabName) {
+                document.querySelectorAll('.admin-tab').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.add('hidden'));
+                
+                document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+                document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+                
+                this.currentTab = tabName;
+            }
+
+            async loadUsers() {
+                const status = document.getElementById('users-status').value;
+                try {
+                    const response = await api.get('/admin/users', { status });
+                    this.renderUsersTable(response.users);
+                } catch (error) {
+                    UI.showError(error.message);
+                }
+            }
+
+            renderUsersTable(users) {
+                const tableHtml = `
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Имя</th>
+                                <th>Заказов</th>
+                                <th>Потрачено</th>
+                                <th>Статус</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${users.map(user => `
+                                <tr>
+                                    <td>${user.id}</td>
+                                    <td>${user.username}</td>
+                                    <td>${user.orders_count}</td>
+                                    <td>${user.total_spent}₽</td>
+                                    <td>${user.is_blocked ? '🚫 Заблокирован' : '✅ Активен'}</td>
+                                    <td>
+                                        ${!user.is_blocked ? 
+                                            `<button onclick="adminPanel.blockUser(${user.id})" class="btn btn-danger btn-sm">Заблокировать</button>` :
+                                            `<button onclick="adminPanel.unblockUser(${user.id})" class="btn btn-success btn-sm">Разблокировать</button>`
+                                        }
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('users-table').innerHTML = tableHtml;
+            }
+
+            async blockUser(userId) {
+                const hours = prompt('На сколько часов заблокировать?', '4');
+                const reason = prompt('Причина блокировки:', '');
+                
+                if (hours && reason) {
+                    try {
+                        await api.put(`/admin/users/${userId}/block`, { hours: parseInt(hours), reason });
+                        UI.showSuccess('Пользователь заблокирован');
+                        this.loadUsers();
+                    } catch (error) {
+                        UI.showError(error.message);
+                    }
+                }
+            }
+
+            async unblockUser(userId) {
+                try {
+                    await api.put(`/admin/users/${userId}/unblock`);
+                    UI.showSuccess('Пользователь разблокирован');
+                    this.loadUsers();
+                } catch (error) {
+                    UI.showError(error.message);
+                }
+            }
+
+            logout() {
+                localStorage.removeItem('admin_token');
+                api.setToken(null);
+                this.showLogin();
+            }
+
+            showMessage(message, type) {
+                const messageEl = document.getElementById('admin-message');
+                messageEl.textContent = message;
+                messageEl.className = `auth-message ${type}`;
+            }
+        }
+
+        const adminPanel = new AdminPanel();
+    </script>
+</body>
+</html>

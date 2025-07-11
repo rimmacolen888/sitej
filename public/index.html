@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Marketplace</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+</head>
+<body>
+    <div id="preloader" class="preloader">
+        <div class="preloader-content">
+            <div class="spinner"></div>
+            <p>Загрузка Site Marketplace...</p>
+        </div>
+    </div>
+
+    <nav id="navbar" class="navbar">
+        <div class="navbar-brand">
+            <h1>Site Marketplace</h1>
+        </div>
+        
+        <div class="navbar-menu" id="nav-menu">
+            <a href="#catalog" class="nav-link">Каталог</a>
+            <a href="#cart" class="nav-link cart-link">
+                Корзина
+                <span id="cart-badge" class="cart-badge">0</span>
+            </a>
+            <a href="#profile" class="nav-link">Профиль</a>
+            <button id="logout-btn" class="btn btn-outline">Выйти</button>
+        </div>
+
+        <button id="nav-toggle" class="nav-toggle">☰</button>
+    </nav>
+
+    <main class="main-content">
+        <section id="auth-section" class="auth-section">
+            <div class="auth-container">
+                <div class="auth-card">
+                    <h2>Добро пожаловать в Site Marketplace</h2>
+                    <p>Маркетплейс для покупки и продажи готовых сайтов</p>
+                    
+                    <div id="auth-message" class="auth-message"></div>
+
+                    <form id="invite-form" class="auth-form">
+                        <h3>Введите инвайт-код</h3>
+                        <div class="form-group">
+                            <input type="text" name="inviteCode" placeholder="Инвайт-код" required class="form-input">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Проверить код</button>
+                    </form>
+
+                    <form id="register-form" class="auth-form hidden">
+                        <h3>Регистрация</h3>
+                        <div class="form-group">
+                            <input type="text" name="username" placeholder="Имя пользователя" required class="form-input">
+                            <small class="form-hint">Только латинские буквы, цифры, _ и -</small>
+                        </div>
+                        <div class="form-group">
+                            <input type="password" name="password" placeholder="Пароль" required class="form-input">
+                            <small class="form-hint">Минимум 6 символов</small>
+                        </div>
+                        <div class="form-group">
+                            <input type="password" name="passwordConfirm" placeholder="Подтвердите пароль" required class="form-input">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
+                        <button type="button" id="back-to-invite" class="btn btn-link">← Назад к инвайт-коду</button>
+                    </form>
+
+                    <form id="login-form" class="auth-form hidden">
+                        <h3>Вход в систему</h3>
+                        <div class="form-group">
+                            <input type="text" name="username" placeholder="Имя пользователя" required class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <input type="password" name="password" placeholder="Пароль" required class="form-input">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Войти</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section id="dashboard-section" class="dashboard-section hidden">
+            <div class="dashboard-container">
+                <div class="dashboard-header">
+                    <h2>Каталог сайтов</h2>
+                    <div class="user-info"></div>
+                </div>
+
+                <div class="filters-section">
+                    <div class="filters-row">
+                        <select id="category-filter" class="form-select">
+                            <option value="">Все категории</option>
+                        </select>
+                        
+                        <input type="text" id="search-input" placeholder="Поиск по названию или URL" class="form-input">
+                        
+                        <div class="price-filters">
+                            <input type="number" id="min-price" placeholder="Мин. цена" class="form-input">
+                            <input type="number" id="max-price" placeholder="Макс. цена" class="form-input">
+                        </div>
+                        
+                        <select id="sort-by" class="form-select">
+                            <option value="upload_date:desc">Новые первыми</option>
+                            <option value="upload_date:asc">Старые первыми</option>
+                            <option value="fixed_price:asc">Цена по возрастанию</option>
+                            <option value="fixed_price:desc">Цена по убыванию</option>
+                            <option value="visits:desc">По популярности</option>
+                            <option value="highest_offer:desc">По максимальной ставке</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filters-actions">
+                        <button id="apply-filters" class="btn btn-primary">Применить</button>
+                        <button id="reset-filters" class="btn btn-secondary">Сбросить</button>
+                    </div>
+                </div>
+
+                <div class="catalog-info">
+                    <div id="catalog-stats" class="catalog-stats"></div>
+                </div>
+
+                <div id="sites-grid" class="sites-grid">
+                    <div class="loading-state">Загрузка сайтов...</div>
+                </div>
+
+                <div id="pagination" class="pagination"></div>
+            </div>
+        </section>
+
+        <section id="site-details-section" class="site-details-section hidden">
+            <div class="site-details-container">
+                <button id="back-to-catalog" class="btn btn-secondary">← Назад к каталогу</button>
+                <div id="site-details" class="site-details"></div>
+            </div>
+        </section>
+
+        <section id="cart-section" class="cart-section hidden">
+            <div class="cart-container">
+                <div class="cart-header">
+                    <h2>Корзина</h2>
+                    <button id="back-to-catalog-from-cart" class="btn btn-secondary">← К каталогу</button>
+                </div>
+                <div id="cart-content" class="cart-content"></div>
+            </div>
+        </section>
+
+        <section id="profile-section" class="profile-section hidden">
+            <div class="profile-container">
+                <div class="profile-header">
+                    <h2>Профиль пользователя</h2>
+                </div>
+                
+                <div class="profile-tabs">
+                    <button class="tab-btn active" data-tab="profile-info">Информация</button>
+                    <button class="tab-btn" data-tab="purchase-history">История покупок</button>
+                    <button class="tab-btn" data-tab="active-offers">Активные предложения</button>
+                    <button class="tab-btn" data-tab="purchase-categories">По категориям</button>
+                </div>
+
+                <div class="profile-content">
+                    <div id="profile-info" class="tab-content active"></div>
+                    <div id="purchase-history" class="tab-content"></div>
+                    <div id="active-offers" class="tab-content"></div>
+                    <div id="purchase-categories" class="tab-content"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="offer-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Предложить цену</h3>
+                <button class="modal-close" data-close="offer-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="offer-info" class="offer-info"></div>
+                <form id="offer-form" class="offer-form">
+                    <div class="form-group">
+                        <label>Ваше предложение (₽):</label>
+                        <input type="number" id="offer-price" name="price" required class="form-input" step="1" min="1">
+                        <small class="form-hint">Введите сумму больше текущего максимума</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Сделать предложение</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/catalog.js"></script>
+    <script src="/js/cart.js"></script>
+    <script src="/js/profile.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
