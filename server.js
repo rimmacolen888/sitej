@@ -5,6 +5,7 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+require('dotenv').config();
 
 // Импорт маршрутов
 const authRoutes = require('./routes/auth');
@@ -39,8 +40,13 @@ app.use(helmet({
         directives: {
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
         },
     },
 }));
@@ -66,6 +72,7 @@ const strictLimiter = rateLimit({
 
 app.use(limiter);
 app.use('/api/auth', strictLimiter);
+app.use('/api/admin/auth', strictLimiter);
 
 // Парсинг данных
 app.use(express.json({ limit: '10mb' }));
@@ -78,8 +85,13 @@ app.use(requestLogger);
 // Статические файлы
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API маршруты
+// API маршруты - ВАЖНО: порядок имеет значение!
 app.use('/api/auth', authRoutes);
+
+// Админские маршруты для авторизации БЕЗ проверки токена
+app.use('/api/admin/auth', adminRoutes);
+
+// Остальные маршруты с проверкой токена
 app.use('/api/user', authenticateToken, userRoutes);
 app.use('/api/admin', authenticateAdmin, adminRoutes);
 app.use('/api/sites', authenticateToken, siteRoutes);
@@ -94,6 +106,10 @@ app.get('/', (req, res) => {
 
 // Админ панель
 app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+app.get('/admin.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
@@ -112,7 +128,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
     console.log(`Сервер запущен на порту ${PORT}`);
     console.log(`Веб-интерфейс: http://localhost:${PORT}`);
-    console.log(`Админ-панель: http://localhost:${PORT}/admin`);
+    console.log(`Админ-панель: http://localhost:${PORT}/admin.html`);
 });
 
 // Graceful shutdown
