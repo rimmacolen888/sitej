@@ -1,11 +1,87 @@
 const express = require('express');
-const { body } = require('express-validator');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
 const DatabaseService = require('../services/databaseService');
 const TelegramService = require('../services/telegramService');
 const { AppError, catchAsync, validateId } = require('../middleware/errorHandler');
-const { hashPassword } = require('../middleware/auth');
+
+// POST /api/admin/auth/login - Авторизация администратора (БЕЗ middleware аутентификации)
+router.post('/auth/login', async (req, res) => {
+    try {
+        console.log('Admin login request:', req.body);
+
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Логин и пароль обязательны'
+            });
+        }
+
+        // Находим администратора
+        const adminResult = await DatabaseService.query(
+            'SELECT * FROM admins WHERE username = $1',
+            [username]
+        );
+
+        console.log('Found admins:', adminResult.rows.length);
+
+        if (adminResult.rows.length === 0) {
+            return res.status(401).json({
+                success: false,
+                message: 'Неверные учетные данные'
+            });
+        }
+
+        const admin = adminResult.rows[0];
+        console.log('Admin found:', admin.username);
+
+        // Проверяем пароль
+        const isValidPassword = await bcrypt.compare(password, admin.password_hash);
+        console.log('Password valid:', isValidPassword);
+
+        if (!isValidPassword) {
+            return res.status(401).json({
+                success: false,
+                message: 'Неверные учетные данные'
+            });
+        }
+
+        // Создаем токен
+        const token = jwt.sign(
+            { 
+                adminId: admin.id, 
+                username: admin.username,
+                type: 'admin'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        console.log('Admin login successful:', admin.username);
+
+        res.json({
+            success: true,
+            token,
+            admin: {
+                id: admin.id,
+                username: admin.username,
+                permissions: admin.permissions
+            }
+        });
+
+    } catch (error) {
+        console.error('Ошибка входа админа:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Внутренняя ошибка сервера'
+        });
+    }
+});
 
 // GET /api/admin/dashboard - Главная панель с статистикой
 router.get('/dashboard', catchAsync(async (req, res) => {
@@ -58,8 +134,6 @@ router.get('/dashboard', catchAsync(async (req, res) => {
         }))
     });
 }));
-
-// УПРАВЛЕНИЕ ИНВАЙТ-КОДАМИ
 
 // GET /api/admin/invites - Список инвайт-кодов
 router.get('/invites', catchAsync(async (req, res) => {
@@ -154,13 +228,11 @@ router.put('/invites/:id', validateId, catchAsync(async (req, res) => {
     });
 }));
 
-// УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ
-
 // GET /api/admin/users - Список пользователей
 router.get('/users', catchAsync(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
-    const status = req.query.status; // 'active', 'blocked', 'expired'
+    const status = req.query.status;
     const offset = (page - 1) * limit;
 
     let query = `
@@ -264,8 +336,6 @@ router.put('/users/:id/unblock', validateId, catchAsync(async (req, res) => {
     });
 }));
 
-// УПРАВЛЕНИЕ САЙТАМИ
-
 // GET /api/admin/sites - Список сайтов для админа
 router.get('/sites', catchAsync(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -319,107 +389,6 @@ router.get('/sites', catchAsync(async (req, res) => {
     });
 }));
 
-// PUT /api/admin/sites/:id - Редактирование сайта
-router.put('/sites/:id',
-    validateId,
-    [
-        body('title').optional().isString().isLength({ max: 255 }),
-        body('description').optional().isString().isLength({ max: 2000 }),
-        body('fixed_price').optional().isFloat({ min: 0 }),
-        body('status').optional().isIn(['available', 'sold', 'reserved', 'hidden']),
-        body('tags').optional().isArray()
-    ],
-    catchAsync(async (req, res) => {
-        const { id } = req.params;
-        const { title, description, fixed_price, status, tags } = req.body;
-
-        const site = await DatabaseService.getSiteById(id);
-        if (!site) {
-            throw new AppError('Сайт не найден', 404);
-        }
-
-        const updates = [];
-        const params = [id];
-        let paramIndex = 2;
-
-        if (title !== undefined) {
-            updates.push(`title = $${paramIndex}`);
-            params.push(title);
-            paramIndex++;
-        }
-
-        if (description !== undefined) {
-            updates.push(`description = $${paramIndex}`);
-            params.push(description);
-            paramIndex++;
-        }
-
-        if (fixed_price !== undefined) {
-            updates.push(`fixed_price = $${paramIndex}`);
-            params.push(fixed_price);
-            paramIndex++;
-        }
-
-        if (status !== undefined) {
-            updates.push(`status = $${paramIndex}`);
-            params.push(status);
-            paramIndex++;
-        }
-
-        if (tags !== undefined) {
-            updates.push(`tags = $${paramIndex}`);
-            params.push(tags);
-            paramIndex++;
-        }
-
-        if (updates.length === 0) {
-            throw new AppError('Нет данных для обновления', 400);
-        }
-
-        const query = `UPDATE sites SET ${updates.join(', ')} WHERE id = $1 RETURNING *`;
-        const result = await DatabaseService.query(query, params);
-
-        await DatabaseService.query(
-            'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-            [req.admin.id, 'update_site', JSON.stringify({ site_id: id, changes: req.body })]
-        );
-
-        res.json({
-            success: true,
-            message: 'Сайт обновлен',
-            site: result.rows[0]
-        });
-    })
-);
-
-// DELETE /api/admin/sites/:id - Удаление сайта
-router.delete('/sites/:id', validateId, catchAsync(async (req, res) => {
-    const { id } = req.params;
-
-    const site = await DatabaseService.getSiteById(id);
-    if (!site) {
-        throw new AppError('Сайт не найден', 404);
-    }
-
-    if (site.status === 'sold') {
-        throw new AppError('Нельзя удалить проданный сайт', 400);
-    }
-
-    await DatabaseService.query('DELETE FROM sites WHERE id = $1', [id]);
-
-    await DatabaseService.query(
-        'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-        [req.admin.id, 'delete_site', JSON.stringify({ site_id: id, url: site.url })]
-    );
-
-    res.json({
-        success: true,
-        message: 'Сайт удален'
-    });
-}));
-
-// УПРАВЛЕНИЕ ЗАКАЗАМИ
-
 // GET /api/admin/orders - Список заказов
 router.get('/orders', catchAsync(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -459,39 +428,5 @@ router.get('/orders', catchAsync(async (req, res) => {
         }
     });
 }));
-
-// PUT /api/admin/orders/:id/status - Изменение статуса заказа
-router.put('/orders/:id/status',
-    validateId,
-    [
-        body('status')
-            .isIn(['pending', 'confirmed', 'cancelled'])
-            .withMessage('Неверный статус заказа')
-    ],
-    catchAsync(async (req, res) => {
-        const { id } = req.params;
-        const { status } = req.body;
-
-        const orderResult = await DatabaseService.query(
-            'UPDATE orders SET status = $2, confirmed_at = CASE WHEN $2 = \'confirmed\' THEN CURRENT_TIMESTAMP ELSE confirmed_at END WHERE id = $1 RETURNING *',
-            [id, status]
-        );
-
-        if (orderResult.rows.length === 0) {
-            throw new AppError('Заказ не найден', 404);
-        }
-
-        await DatabaseService.query(
-            'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-            [req.admin.id, 'change_order_status', JSON.stringify({ order_id: id, new_status: status })]
-        );
-
-        res.json({
-            success: true,
-            message: `Статус заказа изменен на ${status}`,
-            order: orderResult.rows[0]
-        });
-    })
-);
 
 module.exports = router;
