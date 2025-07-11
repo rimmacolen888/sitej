@@ -1,211 +1,122 @@
-const winston = require('winston');
-const path = require('path');
-
-// Настройка логгера
-const logger = winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.errors({ stack: true }),
-        winston.format.json()
-    ),
-    defaultMeta: { service: 'site-marketplace' },
-    transports: [
-        new winston.transports.File({ 
-            filename: path.join(__dirname, '../logs/error.log'), 
-            level: 'error' 
-        }),
-        new winston.transports.File({ 
-            filename: path.join(__dirname, '../logs/combined.log') 
-        }),
-    ],
-});
-
-// В режиме разработки также выводим в консоль
-if (process.env.NODE_ENV !== 'production') {
-    logger.add(new winston.transports.Console({
-        format: winston.format.combine(
-            winston.format.colorize(),
-            winston.format.simple()
-        )
-    }));
-}
-
-// Класс для пользовательских ошибок
 class AppError extends Error {
-    constructor(message, statusCode, isOperational = true) {
+    constructor(message, statusCode) {
         super(message);
         this.statusCode = statusCode;
-        this.isOperational = isOperational;
         this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
+        this.isOperational = true;
 
         Error.captureStackTrace(this, this.constructor);
     }
 }
 
-// Обработчик ошибок валидации базы данных
-const handleValidationError = (error) => {
-    if (error.code === '23505') { // Уникальное ограничение
-        const field = error.detail.match(/Key \((.+?)\)/)?.[1] || 'поле';
-        return new AppError(`${field} уже существует`, 400);
-    }
-    
-    if (error.code === '23503') { // Внешний ключ
-        return new AppError('Связанная запись не найдена', 400);
-    }
-    
-    if (error.code === '23502') { // NOT NULL
-        const field = error.column || 'поле';
-        return new AppError(`${field} является обязательным`, 400);
-    }
-
-    return new AppError('Ошибка базы данных', 500);
+const catchAsync = (fn) => {
+    return (req, res, next) => {
+        fn(req, res, next).catch(next);
+    };
 };
 
-// Обработчик JWT ошибок
-const handleJWTError = () => {
-    return new AppError('Недействительный токен', 401);
+const validateId = (req, res, next) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Неверный ID'
+        });
+    }
+    next();
 };
 
-const handleJWTExpiredError = () => {
-    return new AppError('Токен истек', 401);
-};
-
-// Основной обработчик ошибок
-const errorHandler = (err, req, res, next) => {
-    let error = { ...err };
-    error.message = err.message;
-
-    // Логируем ошибку
-    logger.error({
-        error: err,
-        request: {
-            method: req.method,
-            url: req.url,
-            headers: req.headers,
-            body: req.body,
-            user: req.user?.id || req.admin?.id || 'anonymous'
-        }
-    });
-
-    // PostgreSQL ошибки
-    if (err.code) {
-        error = handleValidationError(err);
-    }
-
-    // JWT ошибки
-    if (err.name === 'JsonWebTokenError') {
-        error = handleJWTError();
-    }
-    if (err.name === 'TokenExpiredError') {
-        error = handleJWTExpiredError();
-    }
-
-    // Multer ошибки (загрузка файлов)
-    if (err.code === 'LIMIT_FILE_SIZE') {
-        error = new AppError('Файл слишком большой', 400);
-    }
-
-    // Ошибки валидации express-validator
-    if (err.array && typeof err.array === 'function') {
-        const messages = err.array().map(error => error.msg);
-        error = new AppError(messages.join(', '), 400);
-    }
-
-    // В продакшене не показываем технические детали
-    if (process.env.NODE_ENV === 'production' && !error.isOperational) {
-        error = new AppError('Что-то пошло не так', 500);
-    }
-
-    res.status(error.statusCode || 500).json({
-        status: error.status || 'error',
-        error: error.message,
-        ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
-    });
-};
-
-// Middleware для логирования запросов
 const requestLogger = (req, res, next) => {
     const start = Date.now();
     
     res.on('finish', () => {
         const duration = Date.now() - start;
+        const logLevel = res.statusCode >= 400 ? 'warn' : 'info';
+        
         const logData = {
+            timestamp: new Date().toISOString(),
             method: req.method,
-            url: req.url,
+            url: req.originalUrl,
             status: res.statusCode,
             duration: `${duration}ms`,
-            ip: req.ip || req.connection.remoteAddress,
+            ip: req.ip,
             userAgent: req.get('User-Agent'),
-            user: req.user?.id || req.admin?.id || 'anonymous'
+            user: req.user?.username || req.admin?.username || 'anonymous',
+            service: 'site-marketplace'
         };
 
-        if (res.statusCode >= 400) {
-            logger.warn('HTTP Request', logData);
-        } else {
-            logger.info('HTTP Request', logData);
-        }
+        console.log(`${logLevel}: HTTP Request`, JSON.stringify(logData));
     });
-
+    
     next();
 };
 
-// Middleware для обработки 404
-const notFoundHandler = (req, res, next) => {
-    const error = new AppError(`Маршрут ${req.originalUrl} не найден`, 404);
-    next(error);
-};
+const errorHandler = (err, req, res, next) => {
+    let error = { ...err };
+    error.message = err.message;
 
-// Функция для безопасного выполнения асинхронных операций
-const catchAsync = (fn) => {
-    return (req, res, next) => {
-        Promise.resolve(fn(req, res, next)).catch(next);
-    };
-};
+    // Логируем ошибку
+    console.error('Error Handler:', err);
 
-// Валидация ID параметров
-const validateId = (req, res, next) => {
-    const { id } = req.params;
-    
-    if (!id || isNaN(parseInt(id))) {
-        return next(new AppError('Некорректный ID', 400));
+    // Mongoose bad ObjectId
+    if (err.name === 'CastError') {
+        const message = 'Ресурс не найден';
+        error = new AppError(message, 404);
     }
-    
-    next();
-};
 
-// Middleware для очистки входящих данных
-const sanitizeInput = (req, res, next) => {
-    // Удаляем потенциально опасные символы из строковых полей
-    const sanitize = (obj) => {
-        for (const key in obj) {
-            if (typeof obj[key] === 'string') {
-                // Удаляем HTML теги и специальные символы
-                obj[key] = obj[key]
-                    .trim()
-                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                    .replace(/<[^>]*>/g, '')
-                    .replace(/[<>]/g, '');
-            } else if (typeof obj[key] === 'object' && obj[key] !== null) {
-                sanitize(obj[key]);
-            }
-        }
-    };
+    // Mongoose duplicate key
+    if (err.code === 11000) {
+        const message = 'Дублирующиеся данные';
+        error = new AppError(message, 400);
+    }
 
-    if (req.body) sanitize(req.body);
-    if (req.query) sanitize(req.query);
-    if (req.params) sanitize(req.params);
+    // Mongoose validation error
+    if (err.name === 'ValidationError') {
+        const message = Object.values(err.errors).map(val => val.message).join(', ');
+        error = new AppError(message, 400);
+    }
 
-    next();
+    // JWT errors
+    if (err.name === 'JsonWebTokenError') {
+        const message = 'Недействительный токен';
+        error = new AppError(message, 401);
+    }
+
+    if (err.name === 'TokenExpiredError') {
+        const message = 'Токен истек';
+        error = new AppError(message, 401);
+    }
+
+    // PostgreSQL errors
+    if (err.code === '23505') { // unique violation
+        const message = 'Запись с такими данными уже существует';
+        error = new AppError(message, 400);
+    }
+
+    if (err.code === '23503') { // foreign key violation
+        const message = 'Связанная запись не найдена';
+        error = new AppError(message, 400);
+    }
+
+    if (err.code === '23502') { // not null violation
+        const message = 'Обязательное поле не заполнено';
+        error = new AppError(message, 400);
+    }
+
+    res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Внутренняя ошибка сервера',
+        ...(process.env.NODE_ENV === 'development' && { 
+            stack: err.stack,
+            error: err 
+        })
+    });
 };
 
 module.exports = {
     AppError,
-    errorHandler,
-    requestLogger,
-    notFoundHandler,
     catchAsync,
     validateId,
-    sanitizeInput,
-    logger
+    requestLogger,
+    errorHandler
 };
