@@ -50,6 +50,12 @@
         .admin-content {
             min-height: 400px;
         }
+        .tab-pane {
+            display: none;
+        }
+        .tab-pane.active {
+            display: block;
+        }
         .admin-table {
             width: 100%;
             border-collapse: collapse;
@@ -92,6 +98,9 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .hidden {
+            display: none;
         }
     </style>
 </head>
@@ -139,7 +148,7 @@
                 <div id="recent-activity"></div>
             </div>
 
-            <div id="tab-users" class="tab-pane hidden">
+            <div id="tab-users" class="tab-pane">
                 <div class="form-inline">
                     <select id="users-status" class="form-select">
                         <option value="">Все пользователи</option>
@@ -152,7 +161,7 @@
                 <div id="users-table"></div>
             </div>
 
-            <div id="tab-sites" class="tab-pane hidden">
+            <div id="tab-sites" class="tab-pane">
                 <div class="form-inline">
                     <select id="sites-category" class="form-select">
                         <option value="">Все категории</option>
@@ -169,7 +178,7 @@
                 <div id="sites-table"></div>
             </div>
 
-            <div id="tab-orders" class="tab-pane hidden">
+            <div id="tab-orders" class="tab-pane">
                 <div class="form-inline">
                     <select id="orders-status" class="form-select">
                         <option value="">Все заказы</option>
@@ -182,7 +191,7 @@
                 <div id="orders-table"></div>
             </div>
 
-            <div id="tab-invites" class="tab-pane hidden">
+            <div id="tab-invites" class="tab-pane">
                 <div class="form-inline">
                     <input type="text" id="invite-code" placeholder="Код" class="form-input">
                     <input type="number" id="invite-days" placeholder="Дней" value="15" class="form-input">
@@ -192,7 +201,7 @@
                 <div id="invites-table"></div>
             </div>
 
-            <div id="tab-import" class="tab-pane hidden">
+            <div id="tab-import" class="tab-pane">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
                     <div>
                         <h4>Импорт сайтов</h4>
@@ -262,7 +271,7 @@
                 if (token) {
                     api.setToken(token);
                     try {
-                        const response = await api.get('/admin/dashboard');
+                        const response = await api.getAdminDashboard();
                         this.showDashboard(response);
                     } catch (error) {
                         this.showLogin();
@@ -281,7 +290,7 @@
                     localStorage.setItem('admin_token', response.token);
                     api.setToken(response.token);
                     
-                    const dashboardData = await api.get('/admin/dashboard');
+                    const dashboardData = await api.getAdminDashboard();
                     this.showDashboard(dashboardData);
                 } catch (error) {
                     this.showMessage(error.message, 'error');
@@ -330,12 +339,26 @@
                 document.getElementById('admin-stats').innerHTML = statsHtml;
             }
 
+            renderRecentActivity(activities) {
+                const activityHtml = activities.map(activity => {
+                    const date = new Date(activity.created_at).toLocaleString('ru-RU');
+                    if (activity.type === 'login') {
+                        return `<p>${date}: Вход пользователя ${activity.details.username} из ${activity.details.country}</p>`;
+                    } else if (activity.type === 'order') {
+                        return `<p>${date}: Заказ #${activity.details.order_id} от ${activity.details.username} на ${activity.details.amount}₽</p>`;
+                    }
+                    return '';
+                }).join('');
+                
+                document.getElementById('recent-activity').innerHTML = activityHtml || '<p>Нет активности</p>';
+            }
+
             showTab(tabName) {
                 document.querySelectorAll('.admin-tab').forEach(tab => tab.classList.remove('active'));
-                document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.add('hidden'));
+                document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
                 
                 document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-                document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+                document.getElementById(`tab-${tabName}`).classList.add('active');
                 
                 this.currentTab = tabName;
             }
@@ -343,10 +366,10 @@
             async loadUsers() {
                 const status = document.getElementById('users-status').value;
                 try {
-                    const response = await api.get('/admin/users', { status });
+                    const response = await api.getAdminUsers(status);
                     this.renderUsersTable(response.users);
                 } catch (error) {
-                    UI.showError(error.message);
+                    this.showMessage(error.message, 'error');
                 }
             }
 
@@ -391,23 +414,187 @@
                 
                 if (hours && reason) {
                     try {
-                        await api.put(`/admin/users/${userId}/block`, { hours: parseInt(hours), reason });
-                        UI.showSuccess('Пользователь заблокирован');
+                        await api.blockUser(userId, parseInt(hours), reason);
+                        this.showMessage('Пользователь заблокирован', 'success');
                         this.loadUsers();
                     } catch (error) {
-                        UI.showError(error.message);
+                        this.showMessage(error.message, 'error');
                     }
                 }
             }
 
             async unblockUser(userId) {
                 try {
-                    await api.put(`/admin/users/${userId}/unblock`);
-                    UI.showSuccess('Пользователь разблокирован');
+                    await api.unblockUser(userId);
+                    this.showMessage('Пользователь разблокирован', 'success');
                     this.loadUsers();
                 } catch (error) {
-                    UI.showError(error.message);
+                    this.showMessage(error.message, 'error');
                 }
+            }
+
+            async loadSites() {
+                try {
+                    const response = await api.getAdminSites();
+                    this.renderSitesTable(response.sites);
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            renderSitesTable(sites) {
+                const tableHtml = `
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>URL</th>
+                                <th>Категория</th>
+                                <th>Цена</th>
+                                <th>Статус</th>
+                                <th>Дата</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sites.map(site => `
+                                <tr>
+                                    <td>${site.id}</td>
+                                    <td>${site.url}</td>
+                                    <td>${site.category_name}</td>
+                                    <td>${site.fixed_price || 'Аукцион'}₽</td>
+                                    <td>${site.status}</td>
+                                    <td>${new Date(site.upload_date).toLocaleDateString('ru-RU')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('sites-table').innerHTML = tableHtml;
+            }
+
+            async loadOrders() {
+                try {
+                    const response = await api.getAdminOrders();
+                    this.renderOrdersTable(response.orders);
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            renderOrdersTable(orders) {
+                const tableHtml = `
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Пользователь</th>
+                                <th>Сумма</th>
+                                <th>Товаров</th>
+                                <th>Статус</th>
+                                <th>Дата</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orders.map(order => `
+                                <tr>
+                                    <td>${order.id}</td>
+                                    <td>${order.username}</td>
+                                    <td>${order.total_amount}₽</td>
+                                    <td>${order.items_count}</td>
+                                    <td>${order.status}</td>
+                                    <td>${new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('orders-table').innerHTML = tableHtml;
+            }
+
+            async createInvite() {
+                const code = document.getElementById('invite-code').value;
+                const days = document.getElementById('invite-days').value;
+                const uses = document.getElementById('invite-uses').value;
+
+                if (!code) {
+                    this.showMessage('Введите код', 'error');
+                    return;
+                }
+
+                try {
+                    await api.createInviteCode(code, parseInt(days), parseInt(uses));
+                    this.showMessage('Инвайт-код создан', 'success');
+                    
+                    // Очищаем форму
+                    document.getElementById('invite-code').value = '';
+                    document.getElementById('invite-days').value = '15';
+                    document.getElementById('invite-uses').value = '1';
+                    
+                    // Обновляем список
+                    this.loadInvites();
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            async loadInvites() {
+                try {
+                    const response = await api.getInviteCodes();
+                    this.renderInvitesTable(response.invites);
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            renderInvitesTable(invites) {
+                const tableHtml = `
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Код</th>
+                                <th>Использований</th>
+                                <th>Истекает</th>
+                                <th>Активен</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${invites.map(invite => `
+                                <tr>
+                                    <td>${invite.code}</td>
+                                    <td>${invite.current_uses}/${invite.max_uses}</td>
+                                    <td>${new Date(invite.expires_at).toLocaleDateString('ru-RU')}</td>
+                                    <td>${invite.is_active ? '✅' : '❌'}</td>
+                                    <td>
+                                        ${invite.is_active ? 
+                                            `<button onclick="adminPanel.deactivateInvite(${invite.id})" class="btn btn-danger btn-sm">Деактивировать</button>` :
+                                            'Неактивен'
+                                        }
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                document.getElementById('invites-table').innerHTML = tableHtml;
+            }
+
+            async deactivateInvite(inviteId) {
+                try {
+                    await api.deactivateInviteCode(inviteId);
+                    this.showMessage('Инвайт-код деактивирован', 'success');
+                    this.loadInvites();
+                } catch (error) {
+                    this.showMessage(error.message, 'error');
+                }
+            }
+
+            async uploadSites() {
+                this.showMessage('Функция импорта будет добавлена позже', 'info');
+            }
+
+            async uploadAntipublic() {
+                this.showMessage('Функция импорта антипаблик будет добавлена позже', 'info');
             }
 
             logout() {
@@ -420,6 +607,11 @@
                 const messageEl = document.getElementById('admin-message');
                 messageEl.textContent = message;
                 messageEl.className = `auth-message ${type}`;
+                messageEl.style.display = 'block';
+                
+                setTimeout(() => {
+                    messageEl.style.display = 'none';
+                }, 3000);
             }
         }
 
