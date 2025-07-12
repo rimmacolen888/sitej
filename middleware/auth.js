@@ -1,225 +1,197 @@
-const express = require('express');
-const { body, validationResult } = require('express-validator');
-const router = express.Router();
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const geoip = require('geoip-lite');
 
-const DatabaseService = require('../services/databaseService');
-const { hashPassword, comparePassword, generateToken } = require('../middleware/auth');
+// Генерация JWT токена
+function generateToken(payload) {
+    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '24h' });
+}
 
-router.post('/check-invite', async (req, res) => {
+// Хеширование пароля
+async function hashPassword(password) {
+    return await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+}
+
+// Проверка пароля
+async function comparePassword(password, hash) {
+    return await bcrypt.compare(password, hash);
+}
+
+// Middleware для аутентификации пользователей
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            message: 'Токен доступа отсутствует'
+        });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(403).json({
+                success: false,
+                message: 'Недействительный токен'
+            });
+        }
+
+        req.user = decoded;
+        next();
+    });
+};
+
+// Middleware для аутентификации администраторов
+const authenticateAdmin = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            message: 'Токен доступа отсутствует'
+        });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(403).json({
+                success: false,
+                message: 'Недействительный токен'
+            });
+        }
+
+        if (decoded.type !== 'admin' && decoded.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Доступ запрещен'
+            });
+        }
+
+        req.admin = decoded;
+        next();
+    });
+};
+
+// Middleware для проверки блокировки пользователя
+const checkUserBlocked = async (req, res, next) => {
     try {
-        const { code } = req.body;
+        const DatabaseService = require('../services/databaseService');
+        const user = await DatabaseService.getUserById(req.user.userId);
         
-        if (!code) {
-            return res.status(400).json({
+        if (!user) {
+            return res.status(401).json({
                 success: false,
-                message: 'Инвайт-код обязателен'
+                message: 'Пользователь не найден'
             });
         }
 
-        const inviteResult = await DatabaseService.query(
-            'SELECT * FROM invite_codes WHERE code = $1 AND is_active = true AND expires_at > CURRENT_TIMESTAMP',
-            [code]
-        );
+        if (user.is_blocked) {
+            if (user.blocked_until && new Date() > user.blocked_until) {
+                // Автоматически разблокируем
+                await DatabaseService.unblockExpiredUsers();
+                next();
+            } else {
+                return res.status(403).json({
+                    success: false,
+                    message: `Аккаунт заблокирован до ${user.blocked_until}`,
+                    blocked_until: user.blocked_until
+                });
+            }
+        } else {
+            next();
+        }
+    } catch (error) {
+        console.error('Ошибка проверки блокировки:', error);
+        next();
+    }
+};
 
-        if (inviteResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
+// Middleware для логирования активности пользователей
+const logUserActivity = (req, res, next) => {
+    // Получаем IP адрес
+    const ip = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 
+               (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+               req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+               req.headers['x-real-ip'] ||
+               '127.0.0.1';
+
+    // Получаем информацию о стране
+    const geo = geoip.lookup(ip);
+    const country = geo ? geo.country : 'Unknown';
+
+    // Добавляем информацию в объект запроса
+    req.userIP = ip;
+    req.userCountry = country;
+    req.userAgent = req.headers['user-agent'];
+
+    next();
+};
+
+// Валидация инвайт-кода
+async function validateInviteCode(code) {
+    try {
+        const DatabaseService = require('../services/databaseService');
+        const invite = await DatabaseService.validateInviteCode(code);
+        
+        if (!invite) {
+            return {
+                isValid: false,
                 message: 'Инвайт-код не найден или истек'
-            });
+            };
         }
-
-        const invite = inviteResult.rows[0];
 
         if (invite.current_uses >= invite.max_uses) {
-            return res.status(400).json({
-                success: false,
+            return {
+                isValid: false,
                 message: 'Инвайт-код исчерпан'
-            });
+            };
         }
 
-        res.json({
-            success: true,
-            message: 'Инвайт-код действителен'
-        });
-
+        return {
+            isValid: true,
+            inviteCode: invite
+        };
     } catch (error) {
-        console.error('Ошибка проверки инвайт-кода:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Внутренняя ошибка сервера'
-        });
+        console.error('Ошибка валидации инвайт-кода:', error);
+        return {
+            isValid: false,
+            message: 'Ошибка проверки инвайт-кода'
+        };
     }
-});
+}
 
-router.post('/register', async (req, res) => {
-    try {
-        const { username, password, inviteCode } = req.body;
+// Валидация данных пользователя
+function validateUserData(username, password) {
+    const errors = [];
 
-        if (!username || !password || !inviteCode) {
-            return res.status(400).json({
-                success: false,
-                message: 'Все поля обязательны'
-            });
-        }
-
-        if (username.length < 3) {
-            return res.status(400).json({
-                success: false,
-                message: 'Имя пользователя должно быть минимум 3 символа'
-            });
-        }
-
-        if (password.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: 'Пароль должен быть минимум 6 символов'
-            });
-        }
-
-        // Проверяем инвайт-код
-        const inviteResult = await DatabaseService.query(
-            'SELECT * FROM invite_codes WHERE code = $1 AND is_active = true AND expires_at > CURRENT_TIMESTAMP',
-            [inviteCode]
-        );
-
-        if (inviteResult.rows.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Неверный или истекший инвайт-код'
-            });
-        }
-
-        const invite = inviteResult.rows[0];
-
-        if (invite.current_uses >= invite.max_uses) {
-            return res.status(400).json({
-                success: false,
-                message: 'Инвайт-код исчерпан'
-            });
-        }
-
-        // Проверяем, не существует ли пользователь
-        const existingUser = await DatabaseService.query(
-            'SELECT id FROM users WHERE username = $1',
-            [username]
-        );
-
-        if (existingUser.rows.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Пользователь с таким именем уже существует'
-            });
-        }
-
-        // Хешируем пароль
-        const passwordHash = await hashPassword(password);
-
-        // Создаем пользователя
-        const accessExpiresAt = new Date();
-        accessExpiresAt.setDate(accessExpiresAt.getDate() + 15);
-
-        const userResult = await DatabaseService.query(`
-            INSERT INTO users (username, password_hash, invite_code_used, access_expires_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, username, created_at
-        `, [username, passwordHash, inviteCode, accessExpiresAt]);
-
-        const user = userResult.rows[0];
-
-        // Обновляем счетчик инвайт-кода
-        await DatabaseService.query(
-            'UPDATE invite_codes SET current_uses = current_uses + 1 WHERE code = $1',
-            [inviteCode]
-        );
-
-        // Создаем токен
-        const token = generateToken({
-            userId: user.id,
-            username: user.username,
-            type: 'user'
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Регистрация успешна',
-            token,
-            user: {
-                id: user.id,
-                username: user.username,
-                access_expires_at: accessExpiresAt
-            }
-        });
-
-    } catch (error) {
-        console.error('Ошибка регистрации:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Внутренняя ошибка сервера'
-        });
+    if (!username || username.length < 3) {
+        errors.push('Имя пользователя должно быть минимум 3 символа');
     }
-});
 
-router.post('/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-
-        if (!username || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Логин и пароль обязательны'
-            });
-        }
-
-        // Находим пользователя
-        const userResult = await DatabaseService.query(
-            'SELECT * FROM users WHERE username = $1',
-            [username]
-        );
-
-        if (userResult.rows.length === 0) {
-            return res.status(401).json({
-                success: false,
-                message: 'Неверные учетные данные'
-            });
-        }
-
-        const user = userResult.rows[0];
-
-        // Проверяем пароль
-        const isValidPassword = await comparePassword(password, user.password_hash);
-
-        if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                message: 'Неверные учетные данные'
-            });
-        }
-
-        // Создаем токен
-        const token = generateToken({
-            userId: user.id,
-            username: user.username,
-            type: 'user'
-        });
-
-        res.json({
-            success: true,
-            message: 'Вход выполнен успешно',
-            token,
-            user: {
-                id: user.id,
-                username: user.username,
-                access_expires_at: user.access_expires_at
-            }
-        });
-
-    } catch (error) {
-        console.error('Ошибка входа:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Внутренняя ошибка сервера'
-        });
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+        errors.push('Имя пользователя может содержать только буквы, цифры, _ и -');
     }
-});
 
-module.exports = router;
+    if (!password || password.length < 6) {
+        errors.push('Пароль должен быть минимум 6 символов');
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}
+
+module.exports = {
+    generateToken,
+    hashPassword,
+    comparePassword,
+    authenticateToken,
+    authenticateAdmin,
+    checkUserBlocked,
+    logUserActivity,
+    validateInviteCode,
+    validateUserData
+};
