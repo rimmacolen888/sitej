@@ -11,6 +11,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const adminRoutes = require('./routes/admin');
+const adminAuthRoutes = require('./routes/adminAuth');
 const siteRoutes = require('./routes/sites');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/orders');
@@ -71,8 +72,6 @@ const strictLimiter = rateLimit({
 });
 
 app.use(limiter);
-app.use('/api/auth', strictLimiter);
-app.use('/api/admin/auth', strictLimiter);
 
 // Парсинг данных
 app.use(express.json({ limit: '10mb' }));
@@ -85,15 +84,19 @@ app.use(requestLogger);
 // Статические файлы
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API маршруты - ВАЖНО: порядок имеет значение!
-app.use('/api/auth', authRoutes);
+// API маршруты - ПРАВИЛЬНЫЙ ПОРЯДОК!
 
-// Админские маршруты для авторизации БЕЗ проверки токена
-app.use('/api/admin/auth', adminRoutes);
+// 1. Авторизация пользователей (БЕЗ проверки токена)
+app.use('/api/auth', strictLimiter, authRoutes);
 
-// Остальные маршруты с проверкой токена
-app.use('/api/user', authenticateToken, userRoutes);
+// 2. Авторизация админов (БЕЗ проверки токена)  
+app.use('/api/admin-auth', strictLimiter, adminAuthRoutes);
+
+// 3. Остальные админские маршруты (С проверкой токена)
 app.use('/api/admin', authenticateAdmin, adminRoutes);
+
+// 4. Пользовательские маршруты (С проверкой токена)
+app.use('/api/user', authenticateToken, userRoutes);
 app.use('/api/sites', authenticateToken, siteRoutes);
 app.use('/api/cart', authenticateToken, cartRoutes);
 app.use('/api/orders', authenticateToken, orderRoutes);
