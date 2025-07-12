@@ -114,6 +114,11 @@ class TelegramService {
         }
     }
 
+    // Alias для совместимости
+    async sendMessage(message, options = {}) {
+        return this.sendNotification(message, options);
+    }
+
     // Уведомления о новых заказах
     async notifyNewOrder(order, items, user) {
         const totalItems = items.length;
@@ -170,8 +175,18 @@ class TelegramService {
         await this.sendNotification(message);
     }
 
+    // Уведомления о разблокировке пользователей
+    async notifyUserUnblocked(user) {
+        const message = 
+            `✅ <b>ПОЛЬЗОВАТЕЛЬ РАЗБЛОКИРОВАН</b>\n\n` +
+            `👤 Пользователь: ${user.username}\n` +
+            `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
+
+        await this.sendNotification(message);
+    }
+
     // Уведомления о выигрыше аукциона
-    async notifyAuctionWin(site, offer, user) {
+    async notifyWinningOffer(site, offer, user) {
         const message = 
             `🏆 <b>АУКЦИОН ЗАВЕРШЕН</b>\n\n` +
             `🌐 Сайт: ${site.title || site.url}\n` +
@@ -179,6 +194,31 @@ class TelegramService {
             `💰 Выигрышная цена: ${offer.offered_price}₽\n\n` +
             `⚠️ У пользователя есть 15 минут на покупку\n` +
             `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
+
+        await this.sendNotification(message);
+    }
+
+    // Уведомления о просроченных победителях
+    async notifyExpiredWinner(site, offer, user) {
+        const message = 
+            `⏰ <b>ВРЕМЯ НА ПОКУПКУ ИСТЕКЛО</b>\n\n` +
+            `🌐 Сайт: ${site.title || site.url}\n` +
+            `👤 Пользователь: ${user.username}\n` +
+            `💰 Цена: ${offer.offered_price}₽\n\n` +
+            `🚫 Пользователь заблокирован на 4 часа\n` +
+            `⏰ Время: ${new Date().toLocaleString('ru-RU')}`;
+
+        await this.sendNotification(message);
+    }
+
+    // Уведомления о последнем шансе
+    async notifyLastChance(site, offer, user) {
+        const message = 
+            `⚡ <b>ПОСЛЕДНИЙ ШАНС!</b>\n\n` +
+            `🌐 Сайт: ${site.title || site.url}\n` +
+            `👤 Пользователь: ${user.username}\n` +
+            `💰 Цена: ${offer.offered_price}₽\n\n` +
+            `⏰ Осталось менее 5 минут на покупку!`;
 
         await this.sendNotification(message);
     }

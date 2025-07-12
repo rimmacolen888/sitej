@@ -77,23 +77,31 @@ class DatabaseService {
     }
 
     async updateUserLastLogin(userId, ipAddress, country) {
-        const query = `
-            UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1;
+        const updateQuery = 'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1';
+        await this.query(updateQuery, [userId]);
+        
+        const logQuery = `
             INSERT INTO auth_logs (user_id, ip_address, country, action)
-            VALUES ($1, $2, $3, 'login');
+            VALUES ($1, $2, $3, 'login')
         `;
-        await this.query(query, [userId, ipAddress, country]);
+        await this.query(logQuery, [userId, ipAddress, country]);
     }
 
     async blockUser(userId, hours = 4) {
         const blockedUntil = new Date();
         blockedUntil.setHours(blockedUntil.getHours() + hours);
 
-        const query = `
-            UPDATE users SET is_blocked = true, blocked_until = $2 WHERE id = $1;
-            INSERT INTO auth_logs (user_id, action) VALUES ($1, 'blocked');
-        `;
-        await this.query(query, [userId, blockedUntil]);
+        await this.query(
+            'UPDATE users SET is_blocked = true, blocked_until = $2 WHERE id = $1',
+            [userId, blockedUntil]
+        );
+        
+        await this.query(
+            'INSERT INTO auth_logs (user_id, action) VALUES ($1, $2)',
+            [userId, 'blocked']
+        );
+        
+        return { blocked_until: blockedUntil };
     }
 
     async unblockExpiredUsers() {

@@ -6,6 +6,7 @@ class SchedulerService {
     constructor() {
         this.jobs = new Map();
         this.isRunning = false;
+        this.startDelay = 10000; // 10 секунд задержки перед началом
     }
 
     start() {
@@ -13,14 +14,17 @@ class SchedulerService {
         
         console.log('Запуск планировщика задач...');
         
-        this.scheduleOfferExpiration();
-        this.scheduleUserUnblock();
-        this.scheduleCartCleanup();
-        this.scheduleDailyStats();
-        this.scheduleWinningOfferNotifications();
-        
-        this.isRunning = true;
-        console.log('Планировщик задач запущен');
+        // Добавляем задержку перед запуском планировщика
+        setTimeout(() => {
+            this.scheduleOfferExpiration();
+            this.scheduleUserUnblock();
+            this.scheduleCartCleanup();
+            this.scheduleDailyStats();
+            this.scheduleWinningOfferNotifications();
+            
+            this.isRunning = true;
+            console.log('Планировщик задач запущен');
+        }, this.startDelay);
     }
 
     stop() {
@@ -43,10 +47,13 @@ class SchedulerService {
             try {
                 await this.processExpiredOffers();
             } catch (error) {
-                console.error('Ошибка обработки истекших предложений:', error);
+                console.error('Ошибка обработки истекших предложений:', error.message);
             }
+        }, {
+            scheduled: false // Не запускаем сразу
         });
 
+        job.start();
         this.jobs.set('offerExpiration', job);
         console.log('Запланирована задача: проверка истекших предложений (каждые 5 минут)');
     }
@@ -56,10 +63,13 @@ class SchedulerService {
             try {
                 await this.processUserUnblock();
             } catch (error) {
-                console.error('Ошибка разблокировки пользователей:', error);
+                console.error('Ошибка разблокировки пользователей:', error.message);
             }
+        }, {
+            scheduled: false
         });
 
+        job.start();
         this.jobs.set('userUnblock', job);
         console.log('Запланирована задача: разблокировка пользователей (каждые 10 минут)');
     }
@@ -69,10 +79,13 @@ class SchedulerService {
             try {
                 await this.cleanupExpiredCarts();
             } catch (error) {
-                console.error('Ошибка очистки корзин:', error);
+                console.error('Ошибка очистки корзин:', error.message);
             }
+        }, {
+            scheduled: false
         });
 
+        job.start();
         this.jobs.set('cartCleanup', job);
         console.log('Запланирована задача: очистка корзин (ежедневно в 02:00)');
     }
@@ -82,10 +95,13 @@ class SchedulerService {
             try {
                 await this.sendDailyStats();
             } catch (error) {
-                console.error('Ошибка отправки ежедневной статистики:', error);
+                console.error('Ошибка отправки ежедневной статистики:', error.message);
             }
+        }, {
+            scheduled: false
         });
 
+        job.start();
         this.jobs.set('dailyStats', job);
         console.log('Запланирована задача: ежедневная статистика (каждый день в 09:00)');
     }
@@ -95,121 +111,142 @@ class SchedulerService {
             try {
                 await this.processWinningOffers();
             } catch (error) {
-                console.error('Ошибка обработки выигрышных предложений:', error);
+                console.error('Ошибка обработки выигрышных предложений:', error.message);
             }
+        }, {
+            scheduled: false
         });
 
+        job.start();
         this.jobs.set('winningOffers', job);
         console.log('Запланирована задача: уведомления о выигрышных предложениях (каждые 2 минуты)');
     }
 
     async processExpiredOffers() {
-        const expiredOffers = await DatabaseService.query(`
-            SELECT po.*, s.title, s.url, u.username, u.id as user_id
-            FROM price_offers po
-            JOIN sites s ON po.site_id = s.id
-            JOIN users u ON po.user_id = u.id
-            WHERE po.status = 'active' AND po.expires_at < CURRENT_TIMESTAMP
-        `);
+        try {
+            const expiredOffers = await DatabaseService.query(`
+                SELECT po.*, s.title, s.url, u.username, u.id as user_id
+                FROM price_offers po
+                JOIN sites s ON po.site_id = s.id
+                JOIN users u ON po.user_id = u.id
+                WHERE po.status = 'active' AND po.expires_at < CURRENT_TIMESTAMP
+            `);
 
-        if (expiredOffers.rows.length === 0) return;
+            if (expiredOffers.rows.length === 0) return;
 
-        console.log(`Обработка ${expiredOffers.rows.length} истекших предложений`);
+            console.log(`Обработка ${expiredOffers.rows.length} истекших предложений`);
 
-        for (const offer of expiredOffers.rows) {
-            await DatabaseService.query(`
-                UPDATE price_offers 
-                SET status = 'expired' 
-                WHERE id = $1
-            `, [offer.id]);
-
-            const remainingOffers = await DatabaseService.query(`
-                SELECT * FROM price_offers 
-                WHERE site_id = $1 AND status = 'active' 
-                ORDER BY offered_price DESC
-                LIMIT 1
-            `, [offer.site_id]);
-
-            if (remainingOffers.rows.length > 0) {
-                const winningOffer = remainingOffers.rows[0];
-                
+            for (const offer of expiredOffers.rows) {
                 await DatabaseService.query(`
                     UPDATE price_offers 
-                    SET status = 'winning', purchase_deadline = CURRENT_TIMESTAMP + INTERVAL '15 minutes'
+                    SET status = 'expired' 
                     WHERE id = $1
-                `, [winningOffer.id]);
+                `, [offer.id]);
 
-                const winnerUser = await DatabaseService.getUserById(winningOffer.user_id);
-                await TelegramService.notifyWinningOffer(
-                    { title: offer.title, url: offer.url },
-                    winningOffer,
-                    winnerUser
-                );
+                const remainingOffers = await DatabaseService.query(`
+                    SELECT * FROM price_offers 
+                    WHERE site_id = $1 AND status = 'active' 
+                    ORDER BY offered_price DESC
+                    LIMIT 1
+                `, [offer.site_id]);
+
+                if (remainingOffers.rows.length > 0) {
+                    const winningOffer = remainingOffers.rows[0];
+                    
+                    await DatabaseService.query(`
+                        UPDATE price_offers 
+                        SET status = 'winning', purchase_deadline = CURRENT_TIMESTAMP + INTERVAL '15 minutes'
+                        WHERE id = $1
+                    `, [winningOffer.id]);
+
+                    const winnerUser = await DatabaseService.getUserById(winningOffer.user_id);
+                    if (winnerUser) {
+                        await TelegramService.notifyWinningOffer(
+                            { title: offer.title, url: offer.url },
+                            winningOffer,
+                            winnerUser
+                        );
+                    }
+                }
             }
+        } catch (error) {
+            console.error('Ошибка в processExpiredOffers:', error);
+            throw error;
         }
     }
 
     async processUserUnblock() {
-        const result = await DatabaseService.query(`
-            UPDATE users 
-            SET is_blocked = false, blocked_until = NULL 
-            WHERE is_blocked = true AND blocked_until < CURRENT_TIMESTAMP
-            RETURNING username
-        `);
+        try {
+            const result = await DatabaseService.query(`
+                UPDATE users 
+                SET is_blocked = false, blocked_until = NULL 
+                WHERE is_blocked = true AND blocked_until < CURRENT_TIMESTAMP
+                RETURNING username
+            `);
 
-        if (result.rows.length > 0) {
-            console.log(`Разблокировано пользователей: ${result.rows.length}`);
-            
-            for (const user of result.rows) {
-                await TelegramService.notifyUserUnblocked(user);
+            if (result.rows.length > 0) {
+                console.log(`Разблокировано пользователей: ${result.rows.length}`);
+                
+                for (const user of result.rows) {
+                    await TelegramService.notifyUserUnblocked(user);
+                }
             }
+        } catch (error) {
+            console.error('Ошибка в processUserUnblock:', error);
+            throw error;
         }
     }
 
     async cleanupExpiredCarts() {
-        const result = await DatabaseService.query(`
-            DELETE FROM cart_items 
-            WHERE reservation_expires_at < CURRENT_TIMESTAMP
-            RETURNING COUNT(*) as deleted_count
-        `);
+        try {
+            const result = await DatabaseService.query(`
+                DELETE FROM cart_items 
+                WHERE reservation_expires_at < CURRENT_TIMESTAMP
+                RETURNING *
+            `);
 
-        const deletedCount = result.rows[0]?.deleted_count || 0;
-        if (deletedCount > 0) {
-            console.log(`Очищено истекших резерваций корзин: ${deletedCount}`);
-        }
+            const deletedCount = result.rows.length;
+            if (deletedCount > 0) {
+                console.log(`Очищено истекших резерваций корзин: ${deletedCount}`);
+            }
 
-        const oldCartItems = await DatabaseService.query(`
-            DELETE FROM cart_items 
-            WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
-            RETURNING COUNT(*) as deleted_count
-        `);
+            const oldCartItems = await DatabaseService.query(`
+                DELETE FROM cart_items 
+                WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
+                RETURNING *
+            `);
 
-        const oldDeletedCount = oldCartItems.rows[0]?.deleted_count || 0;
-        if (oldDeletedCount > 0) {
-            console.log(`Удалено старых товаров из корзин: ${oldDeletedCount}`);
+            const oldDeletedCount = oldCartItems.rows.length;
+            if (oldDeletedCount > 0) {
+                console.log(`Удалено старых товаров из корзин: ${oldDeletedCount}`);
+            }
+        } catch (error) {
+            console.error('Ошибка в cleanupExpiredCarts:', error);
+            throw error;
         }
     }
 
     async sendDailyStats() {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        const statsResult = await DatabaseService.query(`
-            SELECT 
-                COUNT(CASE WHEN u.created_at::date = $1 THEN 1 END) as new_users,
-                COUNT(CASE WHEN o.created_at::date = $1 AND o.status = 'confirmed' THEN 1 END) as confirmed_orders,
-                COALESCE(SUM(CASE WHEN o.created_at::date = $1 AND o.status = 'confirmed' THEN o.total_amount END), 0) as daily_revenue,
-                COUNT(CASE WHEN po.created_at::date = $1 THEN 1 END) as new_offers,
-                COUNT(CASE WHEN s.upload_date::date = $1 THEN 1 END) as new_sites
-            FROM users u
-            FULL OUTER JOIN orders o ON 1=1
-            FULL OUTER JOIN price_offers po ON 1=1
-            FULL OUTER JOIN sites s ON 1=1
-        `, [yesterday.toISOString().split('T')[0]]);
+        try {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            
+            const statsResult = await DatabaseService.query(`
+                SELECT 
+                    COUNT(CASE WHEN u.created_at::date = $1 THEN 1 END) as new_users,
+                    COUNT(CASE WHEN o.created_at::date = $1 AND o.status = 'confirmed' THEN 1 END) as confirmed_orders,
+                    COALESCE(SUM(CASE WHEN o.created_at::date = $1 AND o.status = 'confirmed' THEN o.total_amount END), 0) as daily_revenue,
+                    COUNT(CASE WHEN po.created_at::date = $1 THEN 1 END) as new_offers,
+                    COUNT(CASE WHEN s.upload_date::date = $1 THEN 1 END) as new_sites
+                FROM users u
+                FULL OUTER JOIN orders o ON 1=1
+                FULL OUTER JOIN price_offers po ON 1=1
+                FULL OUTER JOIN sites s ON 1=1
+            `, [yesterday.toISOString().split('T')[0]]);
 
-        const stats = statsResult.rows[0];
-        
-        const message = `📊 Ежедневная статистика
+            const stats = statsResult.rows[0];
+            
+            const message = `📊 Ежедневная статистика
 📅 Дата: ${yesterday.toLocaleDateString('ru-RU')}
 
 👥 Новых пользователей: ${stats.new_users}
@@ -218,57 +255,68 @@ class SchedulerService {
 💡 Новых предложений: ${stats.new_offers}
 🌐 Новых сайтов: ${stats.new_sites}`;
 
-        await TelegramService.sendMessage(message);
+            await TelegramService.sendNotification(message);
+        } catch (error) {
+            console.error('Ошибка в sendDailyStats:', error);
+            throw error;
+        }
     }
 
     async processWinningOffers() {
-        const expiredWinners = await DatabaseService.query(`
-            SELECT po.*, s.title, s.url, u.username, u.id as user_id
-            FROM price_offers po
-            JOIN sites s ON po.site_id = s.id
-            JOIN users u ON po.user_id = u.id
-            WHERE po.status = 'winning' AND po.purchase_deadline < CURRENT_TIMESTAMP
-        `);
+        try {
+            // Обрабатываем истекших победителей
+            const expiredWinners = await DatabaseService.query(`
+                SELECT po.*, s.title, s.url, u.username, u.id as user_id
+                FROM price_offers po
+                JOIN sites s ON po.site_id = s.id
+                JOIN users u ON po.user_id = u.id
+                WHERE po.status = 'winning' AND po.purchase_deadline < CURRENT_TIMESTAMP
+            `);
 
-        for (const offer of expiredWinners.rows) {
-            await DatabaseService.query(`
-                UPDATE price_offers 
-                SET status = 'expired_winner' 
-                WHERE id = $1
-            `, [offer.id]);
+            for (const offer of expiredWinners.rows) {
+                await DatabaseService.query(`
+                    UPDATE price_offers 
+                    SET status = 'expired_winner' 
+                    WHERE id = $1
+                `, [offer.id]);
 
-            await DatabaseService.blockUser(offer.user_id, 4);
+                await DatabaseService.blockUser(offer.user_id, 4);
 
-            await TelegramService.notifyExpiredWinner(
-                { title: offer.title, url: offer.url },
-                offer,
-                { username: offer.username, id: offer.user_id }
-            );
-        }
+                await TelegramService.notifyExpiredWinner(
+                    { title: offer.title, url: offer.url },
+                    offer,
+                    { username: offer.username, id: offer.user_id }
+                );
+            }
 
-        const almostExpiredWinners = await DatabaseService.query(`
-            SELECT po.*, s.title, s.url, u.username
-            FROM price_offers po
-            JOIN sites s ON po.site_id = s.id
-            JOIN users u ON po.user_id = u.id
-            WHERE po.status = 'winning' 
-            AND po.purchase_deadline > CURRENT_TIMESTAMP
-            AND po.purchase_deadline < CURRENT_TIMESTAMP + INTERVAL '5 minutes'
-            AND po.last_reminder_sent IS NULL
-        `);
+            // Уведомляем о скором истечении времени
+            const almostExpiredWinners = await DatabaseService.query(`
+                SELECT po.*, s.title, s.url, u.username
+                FROM price_offers po
+                JOIN sites s ON po.site_id = s.id
+                JOIN users u ON po.user_id = u.id
+                WHERE po.status = 'winning' 
+                AND po.purchase_deadline > CURRENT_TIMESTAMP
+                AND po.purchase_deadline < CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+                AND po.last_reminder_sent IS NULL
+            `);
 
-        for (const offer of almostExpiredWinners.rows) {
-            await TelegramService.notifyLastChance(
-                { title: offer.title, url: offer.url },
-                offer,
-                { username: offer.username }
-            );
+            for (const offer of almostExpiredWinners.rows) {
+                await TelegramService.notifyLastChance(
+                    { title: offer.title, url: offer.url },
+                    offer,
+                    { username: offer.username }
+                );
 
-            await DatabaseService.query(`
-                UPDATE price_offers 
-                SET last_reminder_sent = CURRENT_TIMESTAMP 
-                WHERE id = $1
-            `, [offer.id]);
+                await DatabaseService.query(`
+                    UPDATE price_offers 
+                    SET last_reminder_sent = CURRENT_TIMESTAMP 
+                    WHERE id = $1
+                `, [offer.id]);
+            }
+        } catch (error) {
+            console.error('Ошибка в processWinningOffers:', error);
+            throw error;
         }
     }
 }
