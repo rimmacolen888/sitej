@@ -67,14 +67,21 @@ class API {
     }
 
     async get(endpoint, params = {}) {
-        const url = new URL(`${this.baseURL}${endpoint}`, window.location.origin);
-        Object.keys(params).forEach(key => {
-            if (params[key] !== null && params[key] !== undefined && params[key] !== '') {
-                url.searchParams.append(key, params[key]);
+        let queryString = '';
+        if (Object.keys(params).length > 0) {
+            const searchParams = new URLSearchParams();
+            Object.keys(params).forEach(key => {
+                if (params[key] !== null && params[key] !== undefined && params[key] !== '') {
+                    searchParams.append(key, params[key]);
+                }
+            });
+            queryString = searchParams.toString();
+            if (queryString) {
+                queryString = '?' + queryString;
             }
-        });
+        }
         
-        return this.request(url.pathname + url.search, {
+        return this.request(endpoint + queryString, {
             method: 'GET',
         });
     }
@@ -119,7 +126,7 @@ class API {
     }
 
     async adminLogin(username, password) {
-        return this.post('/admin/auth/login', {
+        return this.post('/admin-auth/login', {
             username,
             password
         });
