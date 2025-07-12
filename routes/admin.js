@@ -1,87 +1,10 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 
 const DatabaseService = require('../services/databaseService');
 const TelegramService = require('../services/telegramService');
 const { AppError, catchAsync, validateId } = require('../middleware/errorHandler');
-
-// POST /api/admin/auth/login - Авторизация администратора (БЕЗ middleware аутентификации)
-router.post('/auth/login', async (req, res) => {
-    try {
-        console.log('Admin login request:', req.body);
-
-        const { username, password } = req.body;
-
-        if (!username || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Логин и пароль обязательны'
-            });
-        }
-
-        // Находим администратора
-        const adminResult = await DatabaseService.query(
-            'SELECT * FROM admins WHERE username = $1',
-            [username]
-        );
-
-        console.log('Found admins:', adminResult.rows.length);
-
-        if (adminResult.rows.length === 0) {
-            return res.status(401).json({
-                success: false,
-                message: 'Неверные учетные данные'
-            });
-        }
-
-        const admin = adminResult.rows[0];
-        console.log('Admin found:', admin.username);
-
-        // Проверяем пароль
-        const isValidPassword = await bcrypt.compare(password, admin.password_hash);
-        console.log('Password valid:', isValidPassword);
-
-        if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                message: 'Неверные учетные данные'
-            });
-        }
-
-        // Создаем токен
-        const token = jwt.sign(
-            { 
-                adminId: admin.id, 
-                username: admin.username,
-                type: 'admin'
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        console.log('Admin login successful:', admin.username);
-
-        res.json({
-            success: true,
-            token,
-            admin: {
-                id: admin.id,
-                username: admin.username,
-                permissions: admin.permissions
-            }
-        });
-
-    } catch (error) {
-        console.error('Ошибка входа админа:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Внутренняя ошибка сервера'
-        });
-    }
-});
 
 // GET /api/admin/dashboard - Главная панель с статистикой
 router.get('/dashboard', catchAsync(async (req, res) => {
@@ -120,7 +43,7 @@ router.get('/dashboard', catchAsync(async (req, res) => {
             COALESCE(AVG(s.fixed_price), 0) as avg_price
         FROM categories c
         LEFT JOIN sites s ON c.id = s.category_id
-        GROUP BY c.id, c.name
+        GROUP BY c.id, c.name, c.description
         ORDER BY c.name
     `);
 
@@ -188,11 +111,11 @@ router.post('/invites',
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + expires_in_days);
 
-        const invite = await DatabaseService.createInviteCode(code, expiresAt, max_uses, req.admin.id);
+        const invite = await DatabaseService.createInviteCode(code, expiresAt, max_uses, req.admin.adminId);
 
         await DatabaseService.query(
             'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-            [req.admin.id, 'create_invite', JSON.stringify({ code, expires_in_days, max_uses })]
+            [req.admin.adminId, 'create_invite', JSON.stringify({ code, expires_in_days, max_uses })]
         );
 
         res.status(201).json({
@@ -218,7 +141,7 @@ router.put('/invites/:id', validateId, catchAsync(async (req, res) => {
 
     await DatabaseService.query(
         'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-        [req.admin.id, 'deactivate_invite', JSON.stringify({ invite_id: id, code: result.rows[0].code })]
+        [req.admin.adminId, 'deactivate_invite', JSON.stringify({ invite_id: id, code: result.rows[0].code })]
     );
 
     res.json({
@@ -298,7 +221,7 @@ router.put('/users/:id/block',
 
         await DatabaseService.query(
             'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-            [req.admin.id, 'block_user', JSON.stringify({ user_id: id, username: user.username, hours, reason })]
+            [req.admin.adminId, 'block_user', JSON.stringify({ user_id: id, username: user.username, hours, reason })]
         );
 
         await TelegramService.notifyUserBlocked(user, reason);
@@ -327,7 +250,7 @@ router.put('/users/:id/unblock', validateId, catchAsync(async (req, res) => {
 
     await DatabaseService.query(
         'INSERT INTO admin_logs (admin_id, action, details) VALUES ($1, $2, $3)',
-        [req.admin.id, 'unblock_user', JSON.stringify({ user_id: id, username: user.username })]
+        [req.admin.adminId, 'unblock_user', JSON.stringify({ user_id: id, username: user.username })]
     );
 
     res.json({
